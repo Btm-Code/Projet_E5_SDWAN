@@ -1,0 +1,147 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dev
+  labels:
+    environment: dev
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rocketapp-deployment
+  namespace: dev
+  labels:
+    app: rocketapp-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: rocket-app
+  template:
+    metadata:
+      labels:
+        app: rocket-app
+    spec:
+      containers:
+      - name: rocket-app
+        imagePullPolicy: IfNotPresent
+        image: rocketapp:beta
+        ports:
+        - containerPort: 5005
+        resources:
+          requests:
+            memory: 1000Mi
+            cpu: 600m
+          limits:
+            memory: 1012Mi
+            cpu: 750m
+        envFrom:
+        - configMapRef:
+            name: rocket-configmap
+        - secretRef: 
+            name: stripe-secret
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  namespace: dev
+  name: rocketapp-deployment
+  labels:
+    app: rocket-svc
+spec:
+  type: LoadBalancer
+  selector:
+    app: rocket-app
+  ports:
+  - port: 5005
+    protocol: TCP
+    targetPort: 5005
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: rocket-configmap
+  namespace: dev
+data:
+  SERVER_ADDRESS: "http://localhost:5005/"
+  DEMO_MODE: "True"
+  DEBUG: "False"
+  EMAIL_HOST: "smtp.gmail.com"
+  EMAIL_PORT: "587"
+  EMAIL_USE_TLS: "True"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: stripe-secret
+  namespace: dev
+type: Opaque
+data:
+  STRIPE_SECRET_KEY : c2tfdGVzdF81MVAwbUlOQms1NnRxRVp3YzlrSU9tYkREQUNIQVQ4d1g3T1ZlWnd3SVVkWG1rMndDMXdWSU1qY29vSnRYQWFGSjdOd3RaTlg1bllvMFVpQXQ4MmEwT3FvaTAwS2tiWjNuT3M=
+  STRIPE_PUBLISHABLE_KEY : cGtfdGVzdF81MVAwbUlOQms1NnRxRVp3Y3FvMlNCZG9mNGRxZGg2SVdsN1VFODQyT0RtazBNdXFpUXlLdnJpb2NQMjlqc3F1bGRZYXJKbG1iSkpYNUh1YkhrUXdVV3FVRzAwQ1F4TWExUUY=
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ingress-rocket-svc
+  namespace: dev
+spec:
+  defaultBackend:
+    service:
+      name: rocket-svc
+      port:
+        number: 5005
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hpa-rocketapp
+  namespace: dev
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: rocketapp-deployment
+  minReplicas: 1
+  maxReplicas: 50
+  behavior:
+    scaleUp:
+      # scale up immediat 
+      stabilizationWindowSeconds: 0
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 5
+      - type: Pods
+        value: 4
+        periodSeconds: 5
+      selectPolicy: Max
+    scaleDown:
+      # 300 par defaut, donc 5 min avant scale down
+      stabilizationWindowSeconds: 10
+      policies:
+      # type : Pods ou Percent
+      - type: Percent
+        # enleve 50% des pods
+        value: 50
+        # Toutes les 5s. Période max 30min (1800s)
+        periodSeconds: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 50
+status:
+  observedGeneration: 1
+  currentReplicas: 1
+  desiredReplicas: 1
+  currentMetrics:
+  - type: Resource
+    resource:
+      name: cpu
+      current:
+        averageUtilization: 0
+        averageValue: 0
